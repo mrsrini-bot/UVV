@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="ta">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Uzhavarin Valarum Velanmai - Flipbook</title>
+  
+  <!-- PageFlip Library CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/page-flip/dist/js/page-flip.browser.js"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background: #101012;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+      color: #eaeaea;
+    }
+
+    .viewport {
+      position: relative;
+      width: 96vw;
+      max-width: 1700px;
+      height: 84vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      cursor: grab;
+      border-radius: 8px;
+    }
+    .viewport:active {
+      cursor: grabbing;
+    }
+
+    #zoom-layer {
+      transform-origin: center center;
+      transition: transform 0.12s ease-out;
+      will-change: transform;
+    }
+
+    .flip-book {
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.75);
+      background-color: #242426;
+    }
+
+    .page {
+      background-color: #ffffff;
+      overflow: hidden;
+    }
+
+    .page img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      image-rendering: -webkit-optimize-contrast;
+      image-rendering: high-quality;
+      transform: translateZ(0);
+      backface-visibility: hidden;
+      display: block;
+    }
+
+    .controls {
+      margin-top: 12px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: rgba(30, 30, 35, 0.85);
+      backdrop-filter: blur(8px);
+      padding: 8px 18px;
+      border-radius: 30px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    button {
+      background: #2e7d32;
+      color: #ffffff;
+      border: none;
+      padding: 7px 16px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.08s;
+    }
+    button:hover {
+      background: #388e3c;
+    }
+    button:active {
+      transform: scale(0.96);
+    }
+    button.alt {
+      background: #424242;
+    }
+    button.alt:hover {
+      background: #545454;
+    }
+
+    #page-num, #zoom-val {
+      font-size: 13px;
+      min-width: 90px;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+      user-select: none;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="viewport" id="viewport">
+    <div id="zoom-layer">
+      <div id="book" class="flip-book"></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button id="prev-btn">&#8592; Prev</button>
+    <span id="page-num">Loading...</span>
+    <button id="next-btn">Next &#8594;</button>
+    
+    <span style="border-left: 1px solid rgba(255,255,255,0.2); height: 18px; margin: 0 4px;"></span>
+
+    <button id="zoom-out" class="alt">-</button>
+    <span id="zoom-val">100%</span>
+    <button id="zoom-in" class="alt">+</button>
+    <button id="zoom-reset" class="alt">Reset</button>
+    <button id="sound-btn" class="alt">🔊 Sound: ON</button>
+    <button id="fs-btn">Fullscreen</button>
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const bookElement = document.getElementById('book');
+      const zoomLayer = document.getElementById('zoom-layer');
+      const viewport = document.getElementById('viewport');
+      
+      const prevBtn = document.getElementById('prev-btn');
+      const nextBtn = document.getElementById('next-btn');
+      const fsBtn = document.getElementById('fs-btn');
+      const soundBtn = document.getElementById('sound-btn');
+      const pageNumText = document.getElementById('page-num');
+      
+      const zoomInBtn = document.getElementById('zoom-in');
+      const zoomOutBtn = document.getElementById('zoom-out');
+      const zoomResetBtn = document.getElementById('zoom-reset');
+      const zoomValText = document.getElementById('zoom-val');
+
+      const TOTAL_PAGES = 40;
+      let soundEnabled = true;
+
+      // 1. Synthesized realistic paper-turn sound using Web Audio API (Zero external assets needed)
+      let audioCtx = null;
+
+      function playPageFlipSound() {
+        if (!soundEnabled) return;
+        try {
+          if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          }
+          if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+          }
+
+          const bufferSize = audioCtx.sampleRate * 0.45; // 450ms duration
+          const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+          const data = buffer.getChannelData(0);
+
+          // Generate filtered white noise profile simulating friction of sliding paper
+          for (let i = 0; i < bufferSize; i++) {
+            data[i] = Math.random() * 2 - 1;
+          }
+
+          const noise = audioCtx.createBufferSource();
+          noise.buffer = buffer;
+
+          // Bandpass filter to mimic paper shuffle
+          const filter = audioCtx.createBiquadFilter();
+          filter.type = 'bandpass';
+          filter.frequency.setValueAtTime(1100, audioCtx.currentTime);
+          filter.frequency.exponentialRampToValueAtTime(350, audioCtx.currentTime + 0.4);
+          filter.Q.value = 1.2;
+
+          // Gentle gain envelope
+          const gainNode = audioCtx.createGain();
+          gainNode.gain.setValueAtTime(0.001, audioCtx.currentTime);
+          gainNode.gain.linearRampToValueAtTime(0.22, audioCtx.currentTime + 0.08);
+          gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.42);
+
+          noise.connect(filter);
+          filter.connect(gainNode);
+          gainNode.connect(audioCtx.destination);
+
+          noise.start();
+        } catch (e) {
+          console.warn('Audio playback not supported:', e);
+        }
+      }
+
+      // 2. Generate 40 pages dynamically (UVV_Page_01.jpg - UVV_Page_40.jpg)
+      for (let i = 1; i <= TOTAL_PAGES; i++) {
+        const pageDiv = document.createElement('div');
+        pageDiv.className = 'page';
+
+        const paddedNum = String(i).padStart(2, '0');
+        const img = document.createElement('img');
+        img.src = `UVV_Page_${paddedNum}.jpg`;
+        img.alt = `Page ${i}`;
+        img.loading = i <= 4 ? 'eager' : 'lazy';
+
+        pageDiv.appendChild(img);
+        bookElement.appendChild(pageDiv);
+      }
+
+      // 3. Initialize PageFlip with slow, smooth animation
+      const pageFlip = new St.PageFlip(bookElement, {
+        width: 2480,
+        height: 3508,
+        size: 'stretch',
+        minWidth: 400,
+        maxWidth: 3200,
+        minHeight: 565,
+        maxHeight: 4526,
+        drawShadow: true,
+        flippingTime: 1100, // Slower, relaxed page turn duration (1.1 seconds)
+        usePortrait: true,
+        autoSize: true,
+        showCover: true
+      });
+
+      pageFlip.loadFromHTML(document.querySelectorAll('.page'));
+
+      // Event triggers
+      prevBtn.addEventListener('click', () => pageFlip.flipPrev());
+      nextBtn.addEventListener('click', () => pageFlip.flipNext());
+
+      pageFlip.on('flip', (e) => {
+        playPageFlipSound();
+        pageNumText.textContent = `Page ${e.data + 1} / ${pageFlip.getPageCount()}`;
+      });
+
+      // Sound toggle button
+      soundBtn.addEventListener('click', () => {
+        soundEnabled = !soundEnabled;
+        soundBtn.textContent = soundEnabled ? '🔊 Sound: ON' : '🔇 Sound: OFF';
+      });
+
+      // 4. Zoom & Pan functionality
+      let scale = 1;
+      let panX = 0;
+      let panY = 0;
+      let isDragging = false;
+      let startX = 0;
+      let startY = 0;
+
+      function updateTransform() {
+        zoomLayer.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+        zoomValText.textContent = `${Math.round(scale * 100)}%`;
+      }
+
+      function setZoom(newScale) {
+        scale = Math.min(Math.max(newScale, 1), 3.0);
+        if (scale === 1) {
+          panX = 0;
+          panY = 0;
+        }
+        updateTransform();
+      }
+
+      zoomInBtn.addEventListener('click', () => setZoom(scale + 0.3));
+      zoomOutBtn.addEventListener('click', () => setZoom(scale - 0.3));
+      zoomResetBtn.addEventListener('click', () => setZoom(1));
+
+      viewport.addEventListener('wheel', (e) => {
+        if (e.ctrlKey || e.metaKey || scale > 1) {
+          e.preventDefault();
+          const delta = e.deltaY * -0.0015;
+          setZoom(scale + delta);
+        }
+      }, { passive: false });
+
+      viewport.addEventListener('mousedown', (e) => {
+        if (scale > 1) {
+          isDragging = true;
+          startX = e.clientX - panX;
+          startY = e.clientY - panY;
+        }
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        panX = e.clientX - startX;
+        panY = e.clientY - startY;
+        updateTransform();
+      });
+
+      window.addEventListener('mouseup', () => {
+        isDragging = false;
+      });
+
+      // Keyboard navigation
+      document.addEventListener('keydown', (e) => {
+        if (scale === 1) {
+          if (e.key === 'ArrowRight') pageFlip.flipNext();
+          if (e.key === 'ArrowLeft') pageFlip.flipPrev();
+        }
+      });
+
+      // Fullscreen mode toggle
+      fsBtn.addEventListener('click', () => {
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen().catch(err => alert(err.message));
+        } else {
+          document.exitFullscreen();
+        }
+      });
+    });
+  </script>
+</body>
+</html>
